@@ -1,0 +1,408 @@
+# 에이전트를 위한 도구 구축 및 통합
+
+이 섹션에서는 Alfred가 웹에 접근할 수 있도록 하여 최신 뉴스와 전 세계 소식을 찾을 수 있게 합니다.
+또한, 날씨 데이터와 Hugging Face Hub 모델 다운로드 통계에도 접근할 수 있어, 최신 이슈에 대해 대화를 나눌 수 있습니다.
+
+## 에이전트에게 웹 접근 권한 부여하기
+
+Alfred가 진정한 르네상스 호스트로서, 세상에 대한 깊은 지식을 갖추길 원한다는 점을 기억하세요.
+
+이를 위해 Alfred가 최신 뉴스와 세계 정보를 얻을 수 있도록 해야 합니다.
+
+먼저 Alfred를 위한 웹 검색 도구를 만들어봅시다!
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+from smolagents import DuckDuckGoSearchTool
+
+# DuckDuckGo 검색 도구 초기화
+search_tool = DuckDuckGoSearchTool()
+
+# 사용 예시
+results = search_tool("현재 프랑스 대통령은 누구인가요?")
+print(results)
+```
+
+예상 출력:
+
+```
+현재 프랑스 대통령은 Emmanuel Macron입니다.
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+from llama_index.tools.duckduckgo import DuckDuckGoSearchToolSpec
+from llama_index.core.tools import FunctionTool
+
+# DuckDuckGo 검색 도구 초기화
+tool_spec = DuckDuckGoSearchToolSpec()
+
+search_tool = FunctionTool.from_defaults(tool_spec.duckduckgo_full_search)
+# 사용 예시
+response = search_tool("현재 프랑스 대통령은 누구인가요?")
+print(response.raw_output[-1]['body'])
+```
+
+예상 출력:
+
+```
+프랑스 공화국 대통령은 프랑스의 국가 원수입니다. 현직 대통령은 2017년 5월 14일부터 Emmanuel Macron입니다. ...
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+from langchain_community.tools import DuckDuckGoSearchRun
+
+search_tool = DuckDuckGoSearchRun()
+results = search_tool.invoke("현재 프랑스 대통령은 누구인가요?")
+print(results)
+```
+
+예상 출력:
+
+```
+Emmanuel Macron(1977년 12월 21일생, 프랑스 아미앵 출신)은 2017년 프랑스 대통령으로 선출된 프랑스의 은행가이자 정치인입니다...
+```
+
+</hfoption>
+</hfoptions>
+
+## 불꽃놀이 일정을 위한 날씨 정보 도구 만들기
+
+완벽한 갈라 파티에는 맑은 하늘 아래 불꽃놀이가 빠질 수 없습니다. 날씨가 나빠서 불꽃놀이가 취소되지 않도록 해야 합니다.
+
+외부 날씨 API를 호출해 특정 위치의 날씨 정보를 얻을 수 있는 맞춤형 도구를 만들어봅시다.
+
+<Tip>
+예시에서는 단순화를 위해 더미 날씨 API를 사용합니다. 실제 날씨 API를 사용하고 싶다면, <a href="../../unit1/tutorial">Unit 1</a>에서처럼 OpenWeatherMap API를 활용한 날씨 도구를 구현할 수 있습니다.
+</Tip>
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+from smolagents import Tool
+import random
+
+class WeatherInfoTool(Tool):
+    name = "weather_info"
+    description = "지정한 위치의 더미 날씨 정보를 가져옵니다."
+    inputs = {
+        "location": {
+            "type": "string",
+            "description": "날씨 정보를 얻고 싶은 위치"
+        }
+    }
+    output_type = "string"
+
+    def forward(self, location: str):
+        # 더미 날씨 데이터
+        weather_conditions = [
+            {"condition": "비", "temp_c": 15},
+            {"condition": "맑음", "temp_c": 25},
+            {"condition": "바람", "temp_c": 20}
+        ]
+        # 무작위로 날씨 선택
+        data = random.choice(weather_conditions)
+        return f"{location}의 날씨: {data['condition']}, {data['temp_c']}°C"
+
+# 도구 초기화
+weather_info_tool = WeatherInfoTool()
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+import random
+from llama_index.core.tools import FunctionTool
+
+def get_weather_info(location: str) -> str:
+    """지정한 위치의 더미 날씨 정보를 가져옵니다."""
+    # 더미 날씨 데이터
+    weather_conditions = [
+        {"condition": "비", "temp_c": 15},
+        {"condition": "맑음", "temp_c": 25},
+        {"condition": "바람", "temp_c": 20}
+    ]
+    # 무작위로 날씨 선택
+    data = random.choice(weather_conditions)
+    return f"{location}의 날씨: {data['condition']}, {data['temp_c']}°C"
+
+# 도구 초기화
+weather_info_tool = FunctionTool.from_defaults(get_weather_info)
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+from langchain.tools import Tool
+import random
+
+def get_weather_info(location: str) -> str:
+    """지정한 위치의 더미 날씨 정보를 가져옵니다."""
+    # 더미 날씨 데이터
+    weather_conditions = [
+        {"condition": "비", "temp_c": 15},
+        {"condition": "맑음", "temp_c": 25},
+        {"condition": "바람", "temp_c": 20}
+    ]
+    # 무작위로 날씨 선택
+    data = random.choice(weather_conditions)
+    return f"{location}의 날씨: {data['condition']}, {data['temp_c']}°C"
+
+# 도구 초기화
+weather_info_tool = Tool(
+    name="get_weather_info",
+    func=get_weather_info,
+    description="지정한 위치의 더미 날씨 정보를 가져옵니다."
+)
+```
+
+</hfoption>
+</hfoptions>
+
+## 영향력 있는 AI 개발자를 위한 Hub 통계 도구 만들기
+
+갈라 파티에는 AI 업계의 유명 인사들이 참석합니다. Alfred가 이들과 대화하며 그들의 인기 모델, 데이터셋, Space에 대해 이야기할 수 있도록, Hugging Face Hub에서 사용자명으로 모델 통계를 가져오는 도구를 만들어봅시다.
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+from smolagents import Tool
+from huggingface_hub import list_models
+
+class HubStatsTool(Tool):
+    name = "hub_stats"
+    description = "Hugging Face Hub에서 특정 저자의 가장 많이 다운로드된 모델을 가져옵니다."
+    inputs = {
+        "author": {
+            "type": "string",
+            "description": "모델 저자/조직의 사용자명"
+        }
+    }
+    output_type = "string"
+
+    def forward(self, author: str):
+        try:
+            # 지정한 저자의 모델을 다운로드 순으로 정렬해 가져오기
+            models = list(list_models(author=author, sort="downloads", direction=-1, limit=1))
+            
+            if models:
+                # 가장 많이 다운로드된 모델의 정보를 가져오기
+                model = models[0]
+                return f"가장 많이 다운로드된 모델은 {model['modelId']}입니다. 다운로드 수: {model['downloads']}"
+            else:
+                return "해당 저자의 모델을 찾을 수 없습니다."
+        except Exception as e:
+            return f"오류 발생: {e}"
+
+# 도구 초기화
+hub_stats_tool = HubStatsTool()
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+from llama_index.core.tools import FunctionTool
+from huggingface_hub import list_models
+
+def get_hub_stats(author: str) -> str:
+    """Hugging Face Hub에서 특정 저자의 가장 많이 다운로드된 모델을 가져옵니다."""
+    try:
+        # 지정한 저자의 모델을 다운로드 순으로 정렬해 가져오기
+        models = list(list_models(author=author, sort="downloads", direction=-1, limit=1))
+        
+        if models:
+            # 가장 많이 다운로드된 모델의 정보를 가져오기
+            model = models[0]
+            return f"가장 많이 다운로드된 모델은 {model['modelId']}입니다. 다운로드 수: {model['downloads']}"
+        else:
+            return "해당 저자의 모델을 찾을 수 없습니다."
+    except Exception as e:
+        return f"오류 발생: {e}"
+
+# 도구 초기화
+hub_stats_tool = FunctionTool.from_defaults(get_hub_stats)
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+from langchain.tools import Tool
+from huggingface_hub import list_models
+
+def get_hub_stats(author: str) -> str:
+    """Hugging Face Hub에서 특정 저자의 가장 많이 다운로드된 모델을 가져옵니다."""
+    try:
+        # 지정한 저자의 모델을 다운로드 순으로 정렬해 가져오기
+        models = list(list_models(author=author, sort="downloads", direction=-1, limit=1))
+        
+        if models:
+            # 가장 많이 다운로드된 모델의 정보를 가져오기
+            model = models[0]
+            return f"가장 많이 다운로드된 모델은 {model['modelId']}입니다. 다운로드 수: {model['downloads']}"
+        else:
+            return "해당 저자의 모델을 찾을 수 없습니다."
+    except Exception as e:
+        return f"오류 발생: {e}"
+
+# 도구 초기화
+hub_stats_tool = Tool(
+    name="get_hub_stats",
+    func=get_hub_stats,
+    description="Hugging Face Hub에서 특정 저자의 가장 많이 다운로드된 모델을 가져옵니다."
+)
+```
+
+</hfoption>
+</hfoptions>
+
+Hub 통계 도구를 통해 Alfred는 이제 영향력 있는 AI 개발자들과 그들의 인기 모델에 대해 대화하며 감탄을 자아낼 수 있습니다.
+
+## 도구를 Alfred와 통합하기
+
+이제 모든 도구가 준비되었으니, Alfred의 에이전트에 통합해봅시다:
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+# Hugging Face 모델 초기화
+model = InferenceClientModel()
+
+# 모든 도구를 포함한 Alfred 생성
+alfred = CodeAgent(
+    tools=[search_tool, weather_info_tool, hub_stats_tool], 
+    model=model
+)
+
+# 갈라 중 Alfred가 받을 수 있는 예시 쿼리
+response = alfred.run("Facebook이 무엇이고, 그들의 가장 인기 있는 모델은 무엇인가요?")
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Facebook은 사용자가 서로 연결하고 정보를 공유하며 상호작용할 수 있는 소셜 네트워킹 웹사이트입니다. Hugging Face Hub에서 Facebook의 가장 많이 다운로드된 모델은 ESMFold_v1입니다.
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+from llama_index.core.agent.workflow import AgentWorkflow
+from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
+
+# Hugging Face 모델 초기화
+llm = HuggingFaceInferenceAPI(model_name="Qwen/Qwen2.5-Coder-32B-Instruct")
+# 모든 도구를 포함한 Alfred 생성
+alfred = AgentWorkflow.from_tools_or_functions(
+    [search_tool, weather_info_tool, hub_stats_tool],
+    llm=llm
+)
+
+# 갈라 중 Alfred가 받을 수 있는 예시 쿼리
+response = await alfred.run("Facebook이 무엇이고, 그들의 가장 인기 있는 모델은 무엇인가요?")
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Facebook은 미국 캘리포니아 멘로파크에 본사를 둔 소셜 네트워킹 서비스 및 기술 기업입니다. Mark Zuckerberg가 설립했으며, 사용자는 프로필을 만들고 친구 및 가족과 연결하며, 사진과 동영상을 공유하고, 관심사 기반 그룹에 가입할 수 있습니다. Hugging Face Hub에서 Facebook의 가장 인기 있는 모델은 `facebook/esmfold_v1`로, 13,109,861회 다운로드되었습니다.
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph.message import add_messages
+from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
+from langgraph.prebuilt import ToolNode
+from langgraph.graph import START, StateGraph
+from langgraph.prebuilt import tools_condition
+from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+
+# 채팅 인터페이스 및 도구 포함
+llm = HuggingFaceEndpoint(
+    repo_id="Qwen/Qwen2.5-Coder-32B-Instruct",
+    huggingfacehub_api_token=HUGGINGFACEHUB_API_TOKEN,
+)
+
+chat = ChatHuggingFace(llm=llm, verbose=True)
+tools = [search_tool, weather_info_tool, hub_stats_tool]
+chat_with_tools = chat.bind_tools(tools)
+
+# AgentState 및 에이전트 그래프 생성
+class AgentState(TypedDict):
+    messages: Annotated[list[AnyMessage], add_messages]
+
+def assistant(state: AgentState):
+    return {
+        "messages": [chat_with_tools.invoke(state["messages"])],
+    }
+
+## 그래프 생성
+builder = StateGraph(AgentState)
+
+# 노드 정의: 실제 작업 수행
+builder.add_node("assistant", assistant)
+builder.add_node("tools", ToolNode(tools))
+
+# 엣지 정의: 제어 흐름 결정
+builder.add_edge(START, "assistant")
+builder.add_conditional_edges(
+    "assistant",
+    # 최신 메시지가 도구를 필요로 하면 도구로 라우팅
+    # 그렇지 않으면 직접 응답 제공
+    tools_condition,
+)
+builder.add_edge("tools", "assistant")
+alfred = builder.compile()
+
+messages = [HumanMessage(content="Facebook이 누구고, 그들의 가장 인기 있는 모델은 무엇인가요?")]
+response = alfred.invoke({"messages": messages})
+
+print("🎩 Alfred의 답변:")
+print(response['messages'][-1].content)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Facebook은 소셜 네트워킹 사이트로 유명한 소셜 미디어 기업이며, Instagram, WhatsApp 등 다양한 서비스를 운영합니다. Hugging Face Hub에서 Facebook의 가장 많이 다운로드된 모델은 facebook/esmfold_v1로, 13,202,321회 다운로드되었습니다.
+```
+</hfoption>
+</hfoptions>
+
+## 결론
+
+이러한 도구들을 통합함으로써 Alfred는 웹 검색부터 날씨 확인, 모델 통계까지 다양한 작업을 처리할 수 있게 되었습니다. 이제 Alfred는 갈라 파티에서 가장 정보에 밝고 매력적인 호스트로 활약할 수 있습니다.
+
+<Tip>
+특정 주제에 대한 최신 뉴스를 가져오는 도구도 직접 구현해보세요.
+
+작업이 끝나면 여러분만의 맞춤형 도구를 <code>tools.py</code> 파일에 구현해보세요.
+</Tip> 

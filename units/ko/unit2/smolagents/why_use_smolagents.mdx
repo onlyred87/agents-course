@@ -1,0 +1,67 @@
+![smolagents 배너](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/license_to_call.png)
+# smolagents를 사용하는 이유
+
+이 모듈에서는 [smolagents](https://huggingface.co/docs/smolagents/en/index)를 사용할 때의 장단점을 살펴보고, 여러분의 필요에 맞는 프레임워크인지 판단할 수 있도록 도와줍니다.
+
+## `smolagents`란?
+
+`smolagents`는 AI 에이전트를 구축하기 위한 간단하면서도 강력한 프레임워크입니다. LLM이 실제 세계와 상호작용(검색, 이미지 생성 등)할 수 있는 _에이전시_를 제공합니다.
+
+unit 1에서 배운 것처럼, AI 에이전트는 LLM을 사용해 **'관찰'**을 바탕으로 **'생각'**을 생성하고 **'행동'**을 수행하는 프로그램입니다. smolagents에서 이것이 어떻게 구현되는지 살펴봅시다.
+
+### `smolagents`의 주요 장점
+- **단순성:** 최소한의 코드 복잡성과 추상화로 프레임워크를 쉽게 이해, 도입, 확장 가능
+- **유연한 LLM 지원:** Hugging Face 도구 및 외부 API와의 통합을 통해 모든 LLM과 작동
+- **코드 우선 접근:** 액션을 직접 코드로 작성하는 Code Agent를 1급 지원, 파싱 없이 도구 호출이 간단
+- **HF Hub 통합:** Hugging Face Hub와의 원활한 통합, Gradio Spaces를 도구로 사용 가능
+
+### smolagents를 언제 사용해야 할까?
+
+이러한 장점을 고려할 때, 다른 프레임워크 대신 smolagents를 언제 사용해야 할까요?
+
+smolagents는 다음과 같은 경우에 이상적입니다:
+- **가볍고 최소한의 솔루션**이 필요할 때
+- **복잡한 설정 없이 빠르게 실험**하고 싶을 때
+- **애플리케이션 로직이 단순**할 때
+
+### 코드 vs. JSON 액션
+다른 프레임워크에서는 에이전트가 액션을 JSON으로 작성하는 반면, `smolagents`는 **코드로 도구 호출에 집중**하여 실행 과정을 단순화합니다. JSON을 파싱해 도구 호출 코드를 만드는 과정이 필요 없으므로, 출력을 바로 실행할 수 있습니다.
+
+아래 다이어그램은 이 차이를 보여줍니다:
+
+![코드 vs. JSON 액션](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/code_vs_json_actions.png)
+
+코드와 JSON 액션의 차이를 복습하려면 [Unit 1의 Actions 섹션](https://huggingface.co/learn/agents-course/unit1/actions#actions-enabling-the-agent-to-engage-with-its-environment)을 참고하세요.
+
+### `smolagents`의 에이전트 유형
+
+smolagents의 에이전트는 **다단계 에이전트**로 동작합니다.
+
+각 [`MultiStepAgent`](https://huggingface.co/docs/smolagents/main/en/reference/agents#smolagents.MultiStepAgent)는 다음을 수행합니다:
+- 하나의 생각
+- 하나의 도구 호출 및 실행
+
+주요 에이전트 타입으로 **[CodeAgent](https://huggingface.co/docs/smolagents/main/en/reference/agents#smolagents.CodeAgent)**를 사용하며, 도구 호출을 JSON으로 작성하는 **[ToolCallingAgent](https://huggingface.co/docs/smolagents/main/en/reference/agents#smolagents.ToolCallingAgent)**도 지원합니다.
+
+각 에이전트 타입은 다음 섹션에서 자세히 다룹니다.
+
+<Tip>
+smolagents에서는 도구를 <code>@tool</code> 데코레이터로 감싼 Python 함수 또는 <code>Tool</code> 클래스로 정의합니다.
+</Tip>
+
+### `smolagents`의 모델 통합
+`smolagents`는 유연한 LLM 통합을 지원하여, [특정 기준](https://huggingface.co/docs/smolagents/main/en/reference/models)을 충족하는 모든 호출 가능한 모델을 사용할 수 있습니다. 프레임워크는 모델 연결을 단순화하는 여러 사전 정의 클래스를 제공합니다:
+
+- **[TransformersModel](https://huggingface.co/docs/smolagents/main/en/reference/models#smolagents.TransformersModel):** 로컬 `transformers` 파이프라인을 구현해 손쉬운 통합 지원
+- **[InferenceClientModel](https://huggingface.co/docs/smolagents/main/en/reference/models#smolagents.InferenceClientModel):** [서버리스 추론](https://huggingface.co/docs/huggingface_hub/main/en/guides/inference) 호출을 [Hugging Face 인프라](https://huggingface.co/docs/api-inference/index) 또는 다양한 [서드파티 추론 제공자](https://huggingface.co/docs/huggingface_hub/main/en/guides/inference#supported-providers-and-tasks)를 통해 지원
+- **[LiteLLMModel](https://huggingface.co/docs/smolagents/main/en/reference/models#smolagents.LiteLLMModel):** [LiteLLM](https://www.litellm.ai/)을 활용한 경량 모델 상호작용 지원
+- **[OpenAIServerModel](https://huggingface.co/docs/smolagents/main/en/reference/models#smolagents.OpenAIServerModel):** OpenAI API 인터페이스를 제공하는 모든 서비스와 연결
+- **[AzureOpenAIServerModel](https://huggingface.co/docs/smolagents/main/en/reference/models#smolagents.AzureOpenAIServerModel):** Azure OpenAI 배포와의 통합 지원
+
+이러한 유연성 덕분에 개발자는 특정 사용 사례에 가장 적합한 모델과 서비스를 선택할 수 있으며, 실험도 쉽게 할 수 있습니다.
+
+이제 smolagents를 왜, 언제 사용하는지 이해했으니, 이 강력한 라이브러리를 더 깊이 탐구해봅시다!
+
+## 참고 자료
+
+- [smolagents 블로그](https://huggingface.co/blog/smolagents) - smolagents 및 코드 상호작용 소개 

@@ -1,0 +1,1729 @@
+<CourseFloatingBanner chapter={2}
+  classNames="absolute z-10 right-0 top-0"
+  notebooks={[
+    {label: "Google Colab", value: "https://colab.research.google.com/#fileId=https://huggingface.co/agents-course/notebooks/blob/main/unit2/smolagents/code_agents.ipynb"},
+]} />
+
+# 코드를 사용하는 에이전트 구축하기
+
+코드 에이전트는 `smolagents`의 기본 에이전트 유형입니다. Python 도구 호출을 생성해 작업을 수행하며, 효율적이고 표현력이 풍부하며 정확한 작업 표현을 달성합니다.
+
+이러한 간소화된 접근 방식은 필요한 작업 수를 줄이고, 복잡한 작업을 단순화하며, 기존 코드 함수를 재사용할 수 있게 합니다. `smolagents`는 약 1,000줄의 코드로 구현된 경량 코드 에이전트 프레임워크를 제공합니다.
+
+![코드 vs JSON 액션](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/code_vs_json_actions.png)
+[Executable Code Actions Elicit Better LLM Agents](https://huggingface.co/papers/2402.01030) 논문의 그래픽
+
+<Tip>
+코드 에이전트가 효과적인 이유에 대해 자세히 알아보려면 smolagents 문서의 <a href="https://huggingface.co/docs/smolagents/en/conceptual_guides/intro_agents#code-agents" target="_blank">이 가이드</a>를 확인하세요.
+</Tip>
+
+## 왜 코드 에이전트인가?
+
+다단계 에이전트 프로세스에서 LLM은 작업을 작성하고 실행하며, 일반적으로 외부 도구 호출이 포함됩니다. 전통적인 접근 방식은 도구 이름과 인수를 문자열로 지정하는 JSON 형식을 사용하며, **시스템은 이를 파싱하여 실행할 도구를 결정해야 합니다**.
+
+하지만 연구에 따르면 **도구 호출 LLM은 코드를 직접 다룰 때 더 효과적으로 작동합니다**. 이는 위 다이어그램([Executable Code Actions Elicit Better LLM Agents](https://huggingface.co/papers/2402.01030))에서 보듯이 `smolagents`의 핵심 원칙입니다.
+
+JSON 대신 코드로 작업을 작성하면 다음과 같은 주요 장점이 있습니다:
+
+* **조합 가능성**: 작업을 쉽게 결합하고 재사용 가능
+* **객체 관리**: 이미지와 같은 복잡한 구조를 직접 다룰 수 있음
+* **일반성**: 계산 가능한 모든 작업을 표현 가능
+* **LLM에 자연스러움**: 고품질 코드가 이미 LLM 학습 데이터에 존재
+
+## 코드 에이전트는 어떻게 작동하나?
+
+![From https://huggingface.co/docs/smolagents/conceptual_guides/react](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/codeagent_docs.png)
+
+위 다이어그램은 Unit 1에서 언급한 ReAct 프레임워크를 따르는 `CodeAgent.run()`의 작동 방식을 보여줍니다. `smolagents`의 에이전트 주요 추상화는 핵심 구성 요소인 `MultiStepAgent`입니다. 아래 예제에서 보듯이 `CodeAgent`는 특별한 종류의 `MultiStepAgent`입니다.
+
+`CodeAgent`는 실행 로그에 저장된 에이전트의 컨텍스트에 기존 변수와 지식을 통합하면서 단계별 사이클로 작업을 수행합니다:
+
+1. 시스템 프롬프트는 `SystemPromptStep`에 저장되고, 사용자 쿼리는 `TaskStep`에 기록됩니다.
+
+2. 그런 다음 다음과 같은 while 루프가 실행됩니다:
+
+    2.1 `agent.write_memory_to_messages()` 메서드는 에이전트의 로그를 LLM이 읽을 수 있는 [채팅 메시지](https://huggingface.co/docs/transformers/main/en/chat_templating) 목록으로 작성합니다.
+    
+    2.2 이 메시지들은 `Model`로 전송되어 완성이 생성됩니다.
+    
+    2.3 완성된 내용에서 작업이 추출되며, `CodeAgent`를 사용하는 우리의 경우 코드 스니펫이어야 합니다.
+    
+    2.4 작업이 실행됩니다.
+    
+    2.5 결과는 `ActionStep`의 메모리에 기록됩니다.
+
+각 단계가 끝날 때, 에이전트에 함수 호출(`agent.step_callback`)이 포함되어 있으면 실행됩니다.
+
+## 예제 살펴보기
+
+<Tip>
+Google Colab을 사용해 실행할 수 있는 <a href="https://huggingface.co/agents-course/notebooks/blob/main/unit2/smolagents/code_agents.ipynb" target="_blank">이 노트북</a>에서 코드를 따라할 수 있습니다.
+</Tip>
+
+알프레드는 웨인 가문의 저택에서 파티를 계획하고 있으며, 모든 것이 순조롭게 진행되도록 여러분의 도움이 필요합니다. 그를 돕기 위해, 다단계 `CodeAgent`가 어떻게 작동하는지 배운 내용을 적용해보겠습니다.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit2/smolagents/alfred-party.jpg" alt="알프레드 파티"/>
+
+아직 `smolagents`를 설치하지 않았다면 다음 명령어로 설치할 수 있습니다:
+
+```bash
+pip install smolagents -U
+```
+
+또한 Serverless Inference API에 접근하기 위해 Hugging Face Hub에 로그인하겠습니다.
+
+```python
+from huggingface_hub import login
+
+login()
+```
+
+### `smolagents`를 사용해 파티 플레이리스트 선택하기
+
+음악은 성공적인 파티의 필수 요소입니다! 알프레드는 플레이리스트 선택에 도움이 필요합니다. 다행히도 `smolagents`가 도와줄 수 있습니다! DuckDuckGo를 사용해 웹을 검색할 수 있는 에이전트를 만들 수 있습니다. 에이전트에 이 도구에 대한 접근 권한을 부여하기 위해, 에이전트를 생성할 때 도구 목록에 포함시킵니다.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit2/smolagents/alfred-playlist.jpg" alt="알프레드 플레이리스트"/>
+
+모델의 경우, Hugging Face의 [Serverless Inference API](https://huggingface.co/docs/api-inference/index)에 접근할 수 있는 `InferenceClientModel`을 사용합니다. 기본 모델은 성능이 좋고 빠른 추론이 가능한 `"Qwen/Qwen2.5-Coder-32B-Instruct"`이지만, Hub에서 호환되는 다른 모델을 선택할 수도 있습니다.
+
+에이전트 실행은 매우 간단합니다:
+
+```python
+from smolagents import CodeAgent, DuckDuckGoSearchTool, InferenceClientModel
+
+agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=InferenceClientModel())
+
+agent.run("웨인 저택의 파티에 어울리는 최고의 음악을 추천해주세요.")
+```
+
+이 예제를 실행하면 **실행되는 워크플로우 단계의 추적이 표시**됩니다. 또한 다음과 같은 메시지와 함께 해당 Python 코드가 출력됩니다:
+
+```python
+ ─ Executing parsed code: ──────────────────────────────────────────────────────────────────────────────────────── 
+  results = web_search(query="best music for a Batman party")                                                      
+  print(results)                                                                                                   
+ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+```
+
+몇 단계 후에 알프레드가 파티에서 사용할 수 있는 생성된 플레이리스트를 볼 수 있습니다! 🎵
+
+### 사용자 정의 도구를 사용해 메뉴 준비하기
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit2/smolagents/alfred-menu.jpg" alt="알프레드 메뉴"/>
+
+이제 플레이리스트를 선택했으니 손님들을 위한 메뉴를 구성해야 합니다. 알프레드는 이를 위해 다시 한 번 `smolagents`를 활용할 수 있습니다. 여기서는 `@tool` 데코레이터를 사용해 도구로 작동하는 사용자 정의 함수를 정의합니다. 도구 생성에 대해서는 나중에 자세히 다룰 것이므로, 지금은 코드를 실행하기만 하면 됩니다.
+
+아래 예제에서 볼 수 있듯이, `@tool` 데코레이터를 사용해 도구를 만들고 `tools` 목록에 포함시킬 것입니다.
+
+```python
+from smolagents import CodeAgent, tool, InferenceClientModel
+
+# 행사에 따른 메뉴 추천 도구
+@tool
+def suggest_menu(occasion: str) -> str:
+    """
+    행사에 따른 메뉴를 추천합니다.
+    Args:
+        occasion (str): 파티의 유형. 허용되는 값:
+                        - "casual": 캐주얼 파티 메뉴
+                        - "formal": 정찬 파티 메뉴
+                        - "superhero": 슈퍼히어로 파티 메뉴
+                        - "custom": 맞춤 메뉴
+    """
+    if occasion == "casual":
+        return "피자, 스낵, 음료"
+    elif occasion == "formal":
+        return "와인과 디저트가 포함된 3코스 정찬"
+    elif occasion == "superhero":
+        return "고에너지 건강식 뷔페"
+    else:
+        return "집사를 위한 맞춤 메뉴"
+
+# 파티를 위한 메뉴를 준비하는 집사 알프레드
+agent = CodeAgent(tools=[suggest_menu], model=InferenceClientModel())
+
+# 파티를 위한 메뉴 준비
+agent.run("파티를 위한 정찬 메뉴를 준비해주세요.")
+```
+
+에이전트는 답을 찾을 때까지 몇 단계를 실행할 것입니다. docstring에 허용되는 값을 명시하면 에이전트가 존재하는 `occasion` 인수 값을 사용하도록 유도하고 환각을 제한하는 데 도움이 됩니다.
+
+메뉴가 준비되었습니다! 🥗
+
+### 에이전트 내에서 Python 임포트 사용하기
+
+플레이리스트와 메뉴는 준비되었지만, 한 가지 중요한 세부 사항을 확인해야 합니다: 준비 시간!
+
+알프레드는 다른 슈퍼히어로의 도움이 필요한 경우를 대비해, 지금 준비를 시작하면 모든 것이 언제 준비될지 계산해야 합니다.
+
+`smolagents`는 Python 코드 스니펫을 작성하고 실행하는 에이전트를 전문으로 하며, 보안을 위한 샌드박스 실행을 제공합니다.
+
+**코드 실행에는 엄격한 보안 조치**가 있습니다 - 기본적으로 미리 정의된 안전 목록 외의 임포트는 차단됩니다. 하지만 `additional_authorized_imports`에 문자열로 전달하여 추가 임포트를 허용할 수 있습니다.
+보안 코드 실행에 대한 자세한 내용은 공식 [가이드](https://huggingface.co/docs/smolagents/tutorials/secure_code_execution)를 참조하세요.
+
+에이전트를 생성할 때 `additional_authorized_imports`를 사용해 `datetime` 모듈의 임포트를 허용하겠습니다.
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+import numpy as np
+import time
+import datetime
+
+agent = CodeAgent(tools=[], model=InferenceClientModel(), additional_authorized_imports=['datetime'])
+
+agent.run(
+    """
+    알프레드는 파티를 준비해야 합니다. 다음은 해야 할 일입니다:
+    1. 음료 준비 - 30분
+    2. 저택 장식 - 60분
+    3. 메뉴 세팅 - 45분
+    4. 음악과 플레이리스트 준비 - 45분
+
+    지금 시작한다면 파티는 언제 준비가 완료될까요?
+    """
+)
+```
+
+이 예제들은 코드 에이전트로 할 수 있는 일의 시작에 불과합니다. 더 많은 내용은 [smolagents 문서](https://huggingface.co/docs/smolagents)에서 확인하세요.
+
+요약하면, `smolagents`는 Python 코드 스니펫을 작성하고 실행하는 에이전트를 전문으로 하며, 샌드박스 실행을 통한 보안을 제공합니다. 로컬 및 API 기반 언어 모델 모두 지원해 다양한 개발 환경에 적합합니다.
+
+### 커스텀 파티 준비 에이전트를 Hub에 공유하기
+
+우리만의 Alfred 에이전트를 커뮤니티에 공유하면 어떨까요? 누구나 Hub에서 바로 다운로드해 사용할 수 있습니다! 🎉
+
+`smolagents` 라이브러리는 전체 에이전트를 커뮤니티에 공유하고, 다른 사람의 에이전트를 즉시 다운로드해 사용할 수 있게 해줍니다. 방법은 다음과 같습니다:
+
+```python
+# 사용자명과 저장소명을 변경하세요
+agent.push_to_hub('sergiopaniego/AlfredAgent')
+```
+
+다시 다운로드하려면 아래 코드를 사용하세요:
+
+```python
+# 사용자명과 저장소명을 변경하세요
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+공유된 에이전트는 Hugging Face Spaces에서 바로 사용 가능하며, [여기](https://huggingface.co/spaces/davidberenstein1957/smolagents-and-tools)에서 다른 에이전트도 탐색할 수 있습니다.
+
+예를 들어, _AlfredAgent_는 [여기](https://huggingface.co/spaces/sergiopaniego/AlfredAgent)에서 사용 가능합니다. 아래에서 직접 체험해보세요:
+
+<iframe
+	src="https://sergiopaniego-alfredagent.hf.space/"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
+
+Alfred가 `smolagents`로 어떻게 이런 에이전트를 만들었는지 궁금할 수 있습니다. 여러 툴을 통합해 아래와 같이 에이전트를 생성할 수 있습니다. 툴에 대한 자세한 내용은 이 유닛의 뒷부분에서 다룹니다:
+
+```python
+from smolagents import CodeAgent, DuckDuckGoSearchTool, FinalAnswerTool, InferenceClientModel, Tool, tool, VisitWebpageTool
+
+@tool
+def suggest_menu(occasion: str) -> str:
+    """
+    상황에 따라 메뉴를 추천합니다.
+    Args:
+        occasion: 파티 유형
+    """
+    if occasion == "casual":
+        return "피자, 스낵, 음료."
+    elif occasion == "formal":
+        return "3코스 디너, 와인, 디저트."
+    elif occasion == "superhero":
+        return "고에너지 건강식 뷔페."
+    else:
+        return "집사 맞춤 메뉴."
+
+@tool
+def catering_service_tool(query: str) -> str:
+    """
+    이 툴은 Gotham City에서 평점이 가장 높은 케이터링 서비스를 반환합니다.
+    Args:
+        query: 케이터링 서비스 검색어
+    """
+    # 예시 서비스와 평점
+    services = {
+        "Gotham Catering Co.": 4.9,
+        "Wayne Manor Catering": 4.8,
+        "Gotham City Events": 4.7,
+    }
+    best_service = max(services, key=services.get)
+    return best_service
+
+class SuperheroPartyThemeTool(Tool):
+    name = "superhero_party_theme_generator"
+    description = """
+    카테고리별로 창의적인 슈퍼히어로 테마 파티 아이디어를 제안합니다.
+    고유한 파티 테마 아이디어를 반환합니다."""
+    inputs = {
+        "category": {
+            "type": "string",
+            "description": "슈퍼히어로 파티 유형 (예: 'classic heroes', 'villain masquerade', 'futuristic Gotham').",
+        }
+    }
+    output_type = "string"
+    def forward(self, category: str):
+        themes = {
+            "classic heroes": "Justice League Gala: DC 영웅 복장, 'Kryptonite Punch' 칵테일 등.",
+            "villain masquerade": "Gotham Rogues' Ball: 배트맨 빌런 복장 가면 무도회.",
+            "futuristic Gotham": "Neo-Gotham Night: 배트맨 비욘드 영감의 사이버펑크 파티.",
+        }
+        return themes.get(category.lower(), "테마 아이디어를 찾을 수 없습니다. 'classic heroes', 'villain masquerade', 'futuristic Gotham' 중에서 시도해보세요.")
+
+agent = CodeAgent(
+    tools=[
+        DuckDuckGoSearchTool(), 
+        VisitWebpageTool(),
+        suggest_menu,
+        catering_service_tool,
+        SuperheroPartyThemeTool(),
+	FinalAnswerTool()
+    ], 
+    model=InferenceClientModel(),
+    max_steps=10,
+    verbosity_level=2
+)
+
+agent.run("Give me the best playlist for a party at the Wayne's mansion. The party idea is a 'villain masquerade' theme")
+```
+
+이처럼 여러 툴을 결합해 커뮤니티와 공유할 수 있는 궁극의 파티 플래너 에이전트를 만들 수 있습니다! 🎉
+
+이제 여러분 차례입니다: 직접 에이전트를 만들어 Hub에 공유해보세요! 🕵️‍♂️💡
+
+<Tip>
+에이전트 프로젝트를 공유하고 싶다면 Hugging Face Hub에서 space를 만들고 <a href="https://huggingface.co/agents-course">agents-course</a> 태그를 달아주세요. 여러분의 작품을 기다립니다!
+</Tip>
+
+### OpenTelemetry와 Langfuse로 파티 준비 에이전트 추적하기 📡
+
+Alfred는 Party Preparator Agent를 디버깅하며 점점 지쳐갑니다. 에이전트는 본질적으로 예측 불가하고 추적이 어렵기 때문입니다. 하지만 궁극의 파티 준비 에이전트를 만들고 프로덕션에 배포하려면 강력한 추적성과 모니터링이 필요합니다.
+
+여기서도 `smolagents`가 해결책을 제공합니다! [OpenTelemetry](https://opentelemetry.io/) 표준을 지원해 에이전트 실행을 쉽게 추적·로깅할 수 있습니다. [Langfuse](https://langfuse.com/)와 `SmolagentsInstrumentor`를 활용하면 에이전트 동작을 손쉽게 분석할 수 있습니다.
+
+설정 방법은 간단합니다!
+
+먼저 필요한 의존성을 설치하세요:
+
+```bash
+pip install opentelemetry-sdk opentelemetry-exporter-otlp openinference-instrumentation-smolagents
+```
+
+Alfred는 이미 Langfuse 계정을 만들고 API 키를 준비했습니다. 아직이라면 [여기](https://cloud.langfuse.com/)에서 가입하거나 [대안](https://huggingface.co/docs/smolagents/tutorials/inspect_runs)을 참고하세요.
+
+API 키를 아래와 같이 환경변수로 설정합니다:
+
+```python
+import os
+import base64
+
+LANGFUSE_PUBLIC_KEY="pk-lf-..."
+LANGFUSE_SECRET_KEY="sk-lf-..."
+LANGFUSE_AUTH=base64.b64encode(f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()).decode()
+
+os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://cloud.langfuse.com/api/public/otel" # EU 데이터 리전
+# os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://us.cloud.langfuse.com/api/public/otel" # US 데이터 리전
+os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"Authorization=Basic {LANGFUSE_AUTH}"
+```
+
+마지막으로 `SmolagentsInstrumentor`를 초기화해 추적을 시작합니다:
+
+```python
+from opentelemetry.sdk.trace import TracerProvider
+
+from openinference.instrumentation.smolagents import SmolagentsInstrumentor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+trace_provider = TracerProvider()
+trace_provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter()))
+
+SmolagentsInstrumentor().instrument(tracer_provider=trace_provider)
+```
+
+이제 Alfred는 연결 완료! 🔌 `smolagents`의 실행 로그가 Langfuse에 기록되어 에이전트 동작을 완전히 파악할 수 있습니다. 이 설정으로 이전 실행을 다시 확인하고 에이전트를 더욱 개선할 수 있습니다.
+
+<Tip>에이전트 추적 및 평가에 대해 더 알고 싶다면 <a href="https://huggingface.co/learn/agents-course/bonus-unit2/introduction">Bonus Unit 2</a>를 참고하세요.</Tip>
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+- [OpenTelemetry로 실행 공유](https://huggingface.co/docs/smolagents/tutorials/inspect_runs) - 에이전트 추적 설정 방법
+
+```python
+from smolagents import CodeAgent, InferenceClientModel
+
+agent = CodeAgent(tools=[], model=InferenceClientModel())
+alfred_agent = agent.from_hub('sergiopaniego/AlfredAgent', trust_remote_code=True)
+alfred_agent.run("Give me the best playlist for a party at Wayne's mansion. The party idea is a 'villain masquerade' theme")  
+```
+
+Alfred는 [여기](https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z)에서 로그를 확인할 수 있습니다.
+
+<Tip>
+실행 중 사소한 오류가 발생했습니다. 로그에서 오류를 찾을 수 있나요? 에이전트가 어떻게 처리했는지 추적해보세요. <a href="https://cloud.langfuse.com/project/cm7bq0abj025rad078ak3luwi/traces/995fc019255528e4f48cf6770b0ce27b?timestamp=2025-02-19T10%3A28%3A36.929Z&observation=80ca57ace4f69b52">여기</a>에서 직접 확인할 수 있습니다. 물론 오류는 이미 수정되었으며, 자세한 내용은 <a href="https://github.com/huggingface/smolagents/issues/838">이 이슈</a>를 참고하세요.
+</Tip>
+
+한편, [추천 플레이리스트](https://open.spotify.com/playlist/0gZMMHjuxMrrybQ7wTMTpw)로 파티 분위기를 완성하세요! 🎶
+
+---
+
+이제 첫 번째 코드 에이전트를 만들었으니, `smolagents`의 두 번째 에이전트 타입인 **Tool Calling Agent** 만드는 법을 배워봅시다.
+
+## 참고 자료
+
+- [smolagents Blog](https://huggingface.co/blog/smolagents) - smolagents 및 코드 인터랙션 소개
+- [smolagents: Building Good Agents](https://huggingface.co/docs/smolagents/tutorials/building_good_agents) - 신뢰성 높은 에이전트 구축 가이드
+- [Building Effective Agents - Anthropic](https://www.anthropic.com/research/building-effective-agents) - 에이전트 설계 원칙
+ 

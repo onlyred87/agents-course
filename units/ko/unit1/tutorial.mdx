@@ -1,0 +1,228 @@
+# smolagents로 첫 번째 에이전트 만들기
+
+이전 섹션에서는 파이썬 코드로 에이전트를 직접 만드는 방법을 배웠고, **그 과정이 얼마나 번거로운지** 확인했습니다. 다행히도, 많은 에이전트 라이브러리가 **복잡한 부분을 대신 처리**해줍니다.
+
+이 튜토리얼에서는 **이미지 생성, 웹 검색, 시간대 확인 등 다양한 작업을 수행할 수 있는 첫 번째 에이전트**를 만들어봅니다!
+
+또한 만든 에이전트를 **Hugging Face Space에 배포하여 친구, 동료와 공유**할 수 있습니다.
+
+시작해봅시다!
+
+## smolagents란?
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/smolagents.png" alt="smolagents"/>
+
+이 에이전트는 **smolagents**라는 라이브러리를 사용해 만듭니다. 이 라이브러리는 **에이전트 개발을 쉽게 해주는 프레임워크**를 제공합니다.
+
+가볍고 단순하지만, 에이전트 구축의 복잡함을 추상화하여 **행동 설계에 집중**할 수 있게 해줍니다.
+
+smolagents에 대한 자세한 내용은 다음 유닛에서 다룹니다. 그 전까지는 <a href="https://huggingface.co/blog/smolagents" target="_blank">블로그</a>나 <a href="https://github.com/huggingface/smolagents" target="_blank">GitHub 저장소</a>를 참고하세요.
+
+요약하면, smolagents는 **코드 에이전트(codeAgent)**에 집중한 라이브러리로, **코드 블록을 통해 "행동"을 수행**하고, 실행 결과를 **"관찰"**합니다.
+
+아래는 우리가 만들 예시입니다!
+
+에이전트에 **이미지 생성 도구**를 제공하고, 고양이 이미지를 생성하도록 요청했습니다.
+
+smolagents의 에이전트는 **이전 섹션에서 만든 커스텀 에이전트와 동일한 동작**을 합니다: **생각, 행동, 관찰**을 반복하며 최종 답에 도달합니다.
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/PQDKcWiuln4?si=ysSTDZoi8y55FVvA" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+흥미롭죠?
+
+## 에이전트 만들기!
+
+먼저 이 Space를 복제하세요: <a href="https://huggingface.co/spaces/agents-course/First_agent_template" target="_blank">https://huggingface.co/spaces/agents-course/First_agent_template</a>
+> 템플릿을 제공해준 <a href="https://huggingface.co/m-ric" target="_blank">Aymeric</a>에게 감사! 🙌
+
+Space를 복제하면 **내 프로필에 로컬 복사본이 생성**됩니다:
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/duplicate-space.gif" alt="Duplicate"/>
+
+복제 후, 에이전트가 모델 API에 접근할 수 있도록 Hugging Face API 토큰을 추가해야 합니다:
+
+1. [https://hf.co/settings/tokens](https://hf.co/settings/tokens)에서 추론 권한이 있는 토큰을 발급
+2. 복제한 Space에서 **Settings** 탭 클릭
+3. **Variables and Secrets** 섹션에서 **New Secret** 클릭
+4. 이름을 `HF_TOKEN`으로 하고 토큰 값을 입력
+5. **Save** 클릭
+
+이 레슨에서 수정할 파일은 **app.py** 하나뿐입니다. [템플릿의 원본](https://huggingface.co/spaces/agents-course/First_agent_template/blob/main/app.py)도 참고할 수 있습니다. 내 Space에서 `Files` 탭 → `app.py` 클릭.
+
+코드를 함께 살펴봅시다:
+
+- 파일은 간단한 라이브러리 import로 시작합니다.
+
+```python
+from smolagents import CodeAgent, DuckDuckGoSearchTool, FinalAnswerTool, InferenceClientModel, load_tool, tool
+import datetime
+import requests
+import pytz
+import yaml
+```
+
+앞서 설명한 대로, **smolagents**의 **CodeAgent** 클래스를 바로 사용합니다.
+
+### 도구(Tools)
+
+이제 도구를 살펴봅시다! 도구에 대한 복습이 필요하면 [Tools](tools) 섹션을 참고하세요.
+
+```python
+@tool
+def my_custom_tool(arg1:str, arg2:int)-> str: # 반환 타입 명시 중요
+    """아직 아무것도 하지 않는 도구
+    Args:
+        arg1: 첫 번째 인자
+        arg2: 두 번째 인자
+    """
+    return "어떤 마법을 만들 건가요?"
+
+@tool
+def get_current_time_in_timezone(timezone: str) -> str:
+    """지정한 시간대의 현재 시간을 가져오는 도구
+    Args:
+        timezone: 유효한 시간대 문자열(예: 'America/New_York')
+    """
+    try:
+        tz = pytz.timezone(timezone)
+        local_time = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        return f"{timezone}의 현재 현지 시각: {local_time}"
+    except Exception as e:
+        return f"시간대 '{timezone}' 조회 오류: {str(e)}"
+```
+
+이 섹션에서 여러분이 직접 도구를 만들어보길 권장합니다! 예시로 두 가지를 제공합니다:
+
+1. **작동하지 않는 더미 도구**(직접 수정해보세요)
+2. **실제로 동작하는 도구**(특정 시간대의 현재 시간 반환)
+
+도구 정의 시:
+1. 함수의 입력/출력 타입 명시
+2. **잘 정리된 docstring**(smolagents는 모든 인자 설명이 docstring에 있어야 함)
+
+### 에이전트
+
+[`Qwen/Qwen2.5-Coder-32B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-Coder-32B-Instruct)를 LLM 엔진으로 사용합니다. 매우 강력한 모델이며 서버리스 API로 접근합니다.
+
+```python
+final_answer = FinalAnswerTool()
+model = InferenceClientModel(
+    max_tokens=2096,
+    temperature=0.5,
+    model_id='Qwen/Qwen2.5-Coder-32B-Instruct',
+    custom_role_conversions=None,
+)
+
+with open("prompts.yaml", 'r') as stream:
+    prompt_templates = yaml.safe_load(stream)
+    
+# CodeAgent 생성
+agent = CodeAgent(
+    model=model,
+    tools=[final_answer], # 여기에 도구 추가(final_answer는 반드시 포함)
+    max_steps=6,
+    verbosity_level=1,
+    grammar=None,
+    planning_interval=None,
+    name=None,
+    description=None,
+    prompt_templates=prompt_templates
+)
+
+GradioUI(agent).launch()
+```
+
+이 에이전트는 **InferenceClient**를 내부적으로 사용하는 **InferenceClientModel** 클래스를 활용합니다.
+
+프레임워크는 2유닛에서 더 자세히 다룹니다. 지금은 **Agent의 tools 파라미터에 도구를 추가**하는 것에 집중하세요.
+
+예를 들어, 처음 import한 `DuckDuckGoSearchTool`이나, Hub에서 불러오는 `image_generation_tool`을 추가할 수 있습니다.
+
+**도구를 추가하면 에이전트의 능력이 확장**됩니다. 창의적으로 도구를 만들어보세요!
+
+### 시스템 프롬프트
+
+에이전트의 시스템 프롬프트는 별도의 `prompts.yaml` 파일에 저장되어 있습니다. 이 파일에는 에이전트의 행동을 안내하는 사전 정의된 지침이 들어 있습니다.
+
+프롬프트를 YAML 파일로 분리하면 다양한 에이전트/용도에 쉽게 재사용할 수 있습니다.
+
+[Space의 파일 구조](https://huggingface.co/spaces/agents-course/First_agent_template/tree/main)에서 `prompts.yaml` 위치와 구성을 확인할 수 있습니다.
+
+전체 app.py 예시:
+
+```python
+from smolagents import CodeAgent, DuckDuckGoSearchTool, InferenceClientModel, load_tool, tool
+import datetime
+import requests
+import pytz
+import yaml
+from tools.final_answer import FinalAnswerTool
+
+from Gradio_UI import GradioUI
+
+# 아래는 아무것도 하지 않는 도구 예시입니다. 창의적으로 수정해보세요!
+@tool
+def my_custom_tool(arg1:str, arg2:int)-> str:
+    """아직 아무것도 하지 않는 도구
+    Args:
+        arg1: 첫 번째 인자
+        arg2: 두 번째 인자
+    """
+    return "어떤 마법을 만들 건가요?"
+
+@tool
+def get_current_time_in_timezone(timezone: str) -> str:
+    """지정한 시간대의 현재 시간을 가져오는 도구
+    Args:
+        timezone: 유효한 시간대 문자열(예: 'America/New_York')
+    """
+    try:
+        tz = pytz.timezone(timezone)
+        local_time = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+        return f"{timezone}의 현재 현지 시각: {local_time}"
+    except Exception as e:
+        return f"시간대 '{timezone}' 조회 오류: {str(e)}"
+
+final_answer = FinalAnswerTool()
+model = InferenceClientModel(
+    max_tokens=2096,
+    temperature=0.5,
+    model_id='Qwen/Qwen2.5-Coder-32B-Instruct',
+    custom_role_conversions=None,
+)
+
+# Hub에서 도구 import
+image_generation_tool = load_tool("agents-course/text-to-image", trust_remote_code=True)
+
+# 시스템 프롬프트 로드
+with open("prompts.yaml", 'r') as stream:
+    prompt_templates = yaml.safe_load(stream)
+    
+agent = CodeAgent(
+    model=model,
+    tools=[final_answer], # 여기에 도구 추가(final_answer는 반드시 포함)
+    max_steps=6,
+    verbosity_level=1,
+    grammar=None,
+    planning_interval=None,
+    name=None,
+    description=None,
+    prompt_templates=prompt_templates
+)
+
+GradioUI(agent).launch()
+```
+
+**목표**는 Space와 Agent에 익숙해지는 것입니다.
+
+현재 템플릿의 에이전트는 **아무 도구도 사용하지 않으니, 미리 만들어진 도구를 추가하거나 직접 만들어보세요!**
+
+여러분의 멋진 에이전트 결과물을 디스코드 **#agents-course-showcase** 채널에 공유해 주세요!
+
+---
+축하합니다, 첫 번째 에이전트를 만들었습니다! 친구, 동료와 공유해보세요.
+
+처음이니 버그가 있거나 느릴 수 있습니다. 다음 유닛에서 더 나은 에이전트 만드는 법을 배웁니다.
+
+가장 좋은 학습법은 직접 시도해보는 것입니다. 계속 수정, 도구 추가, 다른 모델로 실험해보세요.
+
+다음 섹션에서는 퀴즈를 풀고 수료증을 받게 됩니다! 

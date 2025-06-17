@@ -1,0 +1,166 @@
+# LLM이란?
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/whiteboard-check-1.jpg" alt="Unit 1 planning"/>
+
+이전 섹션에서 에이전트의 핵심에는 **AI 모델**이 필요하며, LLM이 가장 흔히 사용된다는 것을 배웠습니다.
+
+이제 LLM이 무엇이고, 어떻게 에이전트를 구동하는지 알아봅니다.
+
+이 섹션은 LLM의 기술적 개요를 간단히 제공합니다. 더 깊이 배우고 싶다면 <a href="https://huggingface.co/learn/nlp-course/chapter1/1" target="_blank">무료 NLP 코스</a>를 참고하세요.
+
+## LLM(대형 언어 모델)이란?
+
+LLM은 **인간 언어를 이해하고 생성하는 데 특화된 AI 모델**입니다. 방대한 텍스트 데이터로 학습되어 언어의 패턴, 구조, 뉘앙스까지 익힙니다. 수천만~수십억 개의 파라미터를 가집니다.
+
+대부분의 LLM은 **트랜스포머(Transformer) 아키텍처** 기반입니다. 이 구조는 2018년 Google의 BERT 발표 이후 큰 주목을 받았습니다.
+
+<figure>
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/transformer.jpg" alt="Transformer"/>
+<figcaption>원래의 트랜스포머 구조: 왼쪽 인코더, 오른쪽 디코더</figcaption>
+</figure>
+
+트랜스포머는 3가지 유형이 있습니다:
+
+1. **인코더(Encoder)**
+   - 입력 텍스트(또는 데이터)를 임베딩(벡터)으로 변환
+   - 예: BERT
+   - 용도: 분류, 의미 검색, 개체명 인식 등
+2. **디코더(Decoder)**
+   - **시퀀스 완성을 위해 새 토큰을 한 번에 하나씩 생성**
+   - 예: Llama
+   - 용도: 텍스트 생성, 챗봇, 코드 생성 등
+3. **시퀀스-투-시퀀스(Seq2Seq, 인코더-디코더)**
+   - 인코더가 입력을 맥락 벡터로 변환, 디코더가 출력 시퀀스 생성
+   - 예: T5, BART
+   - 용도: 번역, 요약, 패러프레이즈 등
+
+LLM은 보통 수십억 파라미터의 디코더 기반 모델입니다. 대표 LLM 예시는 다음과 같습니다:
+
+| **모델** | **제공자** |
+|----------|------------|
+| Deepseek-R1 | DeepSeek |
+| GPT4 | OpenAI |
+| Llama 3 | Meta |
+| SmolLM2 | Hugging Face |
+| Gemma | Google |
+| Mistral | Mistral |
+
+LLM의 핵심 원리는 간단하지만 강력합니다: **이전 토큰 시퀀스를 보고 다음 토큰을 예측**하는 것. "토큰"은 LLM이 다루는 정보 단위로, 보통 단어보다 더 작은 단위입니다.
+
+예를 들어, 영어 단어는 60만 개 이상이지만, Llama 2의 토큰 사전은 약 32,000개입니다. 토크나이저는 보통 서브워드 단위로 동작합니다.
+
+예시: "interest" + "ing" → "interesting", "interest" + "ed" → "interested"
+
+아래 인터랙티브 플레이그라운드에서 다양한 토크나이저를 실험해볼 수 있습니다:
+
+<iframe
+	src="https://agents-course-the-tokenizer-playground.static.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
+
+각 LLM은 모델별 **특수 토큰**을 가집니다. 이 토큰은 시퀀스, 메시지, 응답의 시작/끝을 표시합니다. 입력 프롬프트도 특수 토큰으로 구조화됩니다. 가장 중요한 것은 **EOS(End of Sequence) 토큰**입니다.
+
+특수 토큰의 형태는 모델마다 매우 다양합니다.
+
+| 모델 | 제공자 | EOS 토큰 | 기능 |
+|------|--------|----------|------|
+| GPT4 | OpenAI | `<|endoftext|>` | 메시지 끝 |
+| Llama 3 | Meta | `<|eot_id|>` | 시퀀스 끝 |
+| Deepseek-R1 | DeepSeek | `<|end_of_sentence|>` | 메시지 끝 |
+| SmolLM2 | Hugging Face | `<|im_end|>` | 지시/메시지 끝 |
+| Gemma | Google | `<end_of_turn>` | 대화 턴 끝 |
+
+<Tip>
+특수 토큰을 외울 필요는 없지만, 다양성과 역할을 이해하는 것이 중요합니다. 더 알고 싶다면 모델 Hub의 config 파일을 참고하세요. 예: [SmolLM2의 tokenizer_config.json](https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/blob/main/tokenizer_config.json)
+</Tip>
+
+## 다음 토큰 예측 이해하기
+
+LLM은 **오토리그레시브(autoregressive)** 구조로, **한 번의 출력이 다음 입력이 됨**을 의미합니다. 이 반복은 EOS 토큰이 나올 때까지 계속됩니다.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/AutoregressionSchema.gif" alt="Visual Gif of autoregressive decoding" width="60%">
+
+즉, LLM은 EOS에 도달할 때까지 텍스트를 디코딩합니다. 한 번의 디코딩 루프에서 무슨 일이 일어날까요?
+
+- 입력 텍스트가 **토크나이즈**되면, 모델은 각 토큰의 의미/위치 정보를 담은 벡터를 만듭니다.
+- 이 벡터가 모델에 입력되어, 다음 토큰 후보별 점수를 출력합니다.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/DecodingFinal.gif" alt="Visual Gif of decoding" width="60%">
+
+이 점수를 바탕으로 여러 디코딩 전략이 있습니다.
+- 가장 쉬운 방법은 점수가 가장 높은 토큰을 선택하는 것.
+
+아래 Space에서 SmolLM2로 디코딩 과정을 직접 실험해볼 수 있습니다(EOS는 `<|im_end|>`) :
+
+<iframe
+	src="https://agents-course-decoding-visualizer.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
+
+- 더 발전된 방법으로 *빔서치(beam search)*는 여러 후보 시퀀스를 탐색해 전체 점수가 가장 높은 시퀀스를 찾습니다.
+
+<iframe
+	src="https://agents-course-beam-search-visualizer.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
+
+디코딩에 대해 더 알고 싶다면 [NLP 코스](https://huggingface.co/learn/nlp-course)를 참고하세요.
+
+## Attention is all you need
+
+트랜스포머의 핵심은 **어텐션(Attention)**입니다. 다음 단어를 예측할 때, 문장 내 모든 단어가 똑같이 중요하지 않습니다. 예: "The capital of France is ..."에서 "France"와 "capital"이 가장 중요.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/AttentionSceneFinal.gif" alt="Visual Gif of Attention" width="60%">
+
+이렇게 중요한 단어에 집중하는 것이 매우 효과적임이 입증되었습니다.
+
+기본 원리는 GPT-2 이후 변하지 않았지만, 신경망 규모 확장과 어텐션의 긴 시퀀스 적용 등 많은 발전이 있었습니다.
+
+LLM을 쓸 때 자주 듣는 *context length*는 LLM이 처리할 수 있는 최대 토큰 수, 즉 어텐션 범위를 의미합니다.
+
+## 프롬프트 설계가 중요하다
+
+LLM의 유일한 임무는 입력 토큰을 보고 다음 토큰을 예측하는 것이므로, 입력 시퀀스(프롬프트) 설계가 매우 중요합니다. 프롬프트를 잘 설계하면 **원하는 출력을 유도**할 수 있습니다.
+
+## LLM은 어떻게 학습되는가?
+
+LLM은 대규모 텍스트 데이터셋에서, 시퀀스 내 다음 단어 예측을 목표로 **자기지도/마스킹 언어 모델링** 방식으로 학습됩니다.
+
+이런 비지도 학습을 통해 언어 구조와 패턴을 익혀 **보지 못한 데이터에도 일반화**할 수 있습니다.
+
+이후 _pre-training_이 끝나면, 특정 작업에 맞게 **지도학습(fine-tuning)**으로 추가 학습할 수 있습니다. 예: 대화, 도구 사용, 분류, 코드 생성 등.
+
+## LLM을 어떻게 사용할 수 있나?
+
+1. **로컬 실행**(충분한 하드웨어 필요)
+2. **클라우드/API 사용**(예: Hugging Face Serverless Inference API)
+
+이 코스에서는 주로 Hugging Face Hub의 API로 모델을 사용합니다. 이후에는 로컬 실행도 다룹니다.
+
+## LLM은 에이전트에서 어떻게 쓰이나?
+
+LLM은 에이전트의 핵심으로, **인간 언어 이해/생성의 기반**을 제공합니다.
+
+사용자 지시 해석, 대화 맥락 유지, 계획 수립, 도구 선택 등 다양한 역할을 합니다.
+
+이 유닛에서 각 단계를 더 자세히 다루지만, 지금은 LLM이 **에이전트의 두뇌**임을 이해하면 충분합니다.
+
+---
+
+많은 정보를 다뤘습니다! LLM의 기본, 동작 원리, 에이전트에서의 역할을 배웠습니다.
+
+더 깊이 배우고 싶다면 <a href="https://huggingface.co/learn/nlp-course/chapter1/1" target="_blank">무료 NLP 코스</a>를 참고하세요.
+
+이제 LLM이 대화에서 출력을 어떻게 구조화하는지 알아봅니다.
+
+<a href="https://huggingface.co/agents-course/notebooks/blob/main/unit1/dummy_agent_library.ipynb" target="_blank">이 노트북</a>을 실행하려면 <a href="https://hf.co/settings/tokens" target="_blank">Hugging Face 토큰</a>이 필요합니다.
+
+Jupyter 노트북 실행법은 <a href="https://huggingface.co/docs/hub/notebooks">여기</a> 참고.
+
+<a href="https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct" target="_blank">Meta Llama 모델</a>은 별도 접근 요청 필요. 

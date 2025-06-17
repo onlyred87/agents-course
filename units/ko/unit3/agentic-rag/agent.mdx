@@ -1,0 +1,458 @@
+# 갈라 에이전트 만들기
+
+이제 Alfred를 위한 모든 필수 컴포넌트를 구축했으니, 이 모든 것을 하나로 모아 우리의 화려한 갈라 파티를 도울 수 있는 완전한 에이전트로 만들어봅시다.
+
+이 섹션에서는 손님 정보 검색, 웹 검색, 날씨 정보, Hub 통계 도구를 하나의 강력한 에이전트로 결합합니다.
+
+## Alfred 조립하기: 완성형 에이전트
+
+이전 섹션에서 만든 모든 도구를 다시 구현하는 대신, 각각의 모듈(예: `tools.py`, `retriever.py`)에서 임포트하여 사용하겠습니다.
+
+<Tip>
+아직 도구를 구현하지 않았다면, <a href="./tools">tools</a>와 <a href="./invitees">retriever</a> 섹션으로 돌아가 구현한 뒤, <code>tools.py</code>와 <code>retriever.py</code> 파일에 추가하세요.
+</Tip>
+
+이제 필요한 라이브러리와 도구를 임포트해봅시다:
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+# 필요한 라이브러리 임포트
+import random
+from smolagents import CodeAgent, InferenceClientModel
+
+# 커스텀 도구 임포트
+from tools import DuckDuckGoSearchTool, WeatherInfoTool, HubStatsTool
+from retriever import load_guest_dataset
+```
+
+이제 모든 도구를 하나의 에이전트로 결합해봅시다:
+
+```python
+# Hugging Face 모델 초기화
+model = InferenceClientModel()
+
+# 웹 검색 도구 초기화
+search_tool = DuckDuckGoSearchTool()
+
+# 날씨 도구 초기화
+weather_info_tool = WeatherInfoTool()
+
+# Hub 통계 도구 초기화
+hub_stats_tool = HubStatsTool()
+
+# 손님 데이터셋 로드 및 손님 정보 도구 초기화
+guest_info_tool = load_guest_dataset()
+
+# 모든 도구를 포함한 Alfred 생성
+alfred = CodeAgent(
+    tools=[guest_info_tool, weather_info_tool, hub_stats_tool, search_tool], 
+    model=model,
+    add_base_tools=True,  # 추가 기본 도구 포함
+    planning_interval=3   # 3스텝마다 플래닝 활성화
+)
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+# 필요한 라이브러리 임포트
+from llama_index.core.agent.workflow import AgentWorkflow
+from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
+
+from tools import search_tool, weather_info_tool, hub_stats_tool
+from retriever import guest_info_tool
+```
+
+이제 모든 도구를 하나의 에이전트로 결합해봅시다:
+
+```python
+# Hugging Face 모델 초기화
+llm = HuggingFaceInferenceAPI(model_name="Qwen/Qwen2.5-Coder-32B-Instruct")
+
+# 모든 도구를 포함한 Alfred 생성
+alfred = AgentWorkflow.from_tools_or_functions(
+    [guest_info_tool, search_tool, weather_info_tool, hub_stats_tool],
+    llm=llm,
+)
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph.message import add_messages
+from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
+from langgraph.prebuilt import ToolNode
+from langgraph.graph import START, StateGraph
+from langgraph.prebuilt import tools_condition
+from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+
+from tools import DuckDuckGoSearchRun, weather_info_tool, hub_stats_tool
+from retriever import guest_info_tool
+```
+
+이제 모든 도구를 하나의 에이전트로 결합해봅시다:
+
+```python
+# 웹 검색 도구 초기화
+search_tool = DuckDuckGoSearchRun()
+
+# 채팅 인터페이스 및 도구 포함
+llm = HuggingFaceEndpoint(
+    repo_id="Qwen/Qwen2.5-Coder-32B-Instruct",
+    huggingfacehub_api_token=HUGGINGFACEHUB_API_TOKEN,
+)
+
+chat = ChatHuggingFace(llm=llm, verbose=True)
+tools = [guest_info_tool, search_tool, weather_info_tool, hub_stats_tool]
+chat_with_tools = chat.bind_tools(tools)
+
+# AgentState 및 에이전트 그래프 생성
+class AgentState(TypedDict):
+    messages: Annotated[list[AnyMessage], add_messages]
+
+def assistant(state: AgentState):
+    return {
+        "messages": [chat_with_tools.invoke(state["messages"])],
+    }
+
+## 그래프 생성
+builder = StateGraph(AgentState)
+
+# 노드 정의: 실제 작업 수행
+builder.add_node("assistant", assistant)
+builder.add_node("tools", ToolNode(tools))
+
+# 엣지 정의: 제어 흐름 결정
+builder.add_edge(START, "assistant")
+builder.add_conditional_edges(
+    "assistant",
+    # 최신 메시지가 도구를 필요로 하면 도구로 라우팅
+    # 그렇지 않으면 직접 응답 제공
+    tools_condition,
+)
+builder.add_edge("tools", "assistant")
+alfred = builder.compile()
+```
+</hfoption>
+</hfoptions>
+
+이제 에이전트가 사용할 준비가 되었습니다!
+
+## Alfred 사용하기: 엔드 투 엔드 예시
+
+이제 Alfred가 모든 도구를 갖추었으니, 갈라 파티에서 다양한 작업을 어떻게 도울 수 있는지 살펴봅시다.
+
+### 예시 1: 손님 정보 찾기
+
+Alfred가 손님 정보를 어떻게 도울 수 있는지 살펴봅시다.
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+query = "'Lady Ada Lovelace'에 대해 알려줘"
+response = alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Ada Lovelace, 또는 Augusta Ada King, 러브레이스 백작부인으로도 알려진 그녀는 영국의 수학자이자 작가입니다. 1815년 12월 10일에 태어나 1852년 11월 27일에 세상을 떠났으며, Charles Babbage의 해석기관(기계식 범용 컴퓨터 제안) 작업으로 유명합니다. Ada Lovelace는 1843년 해석기관을 위한 프로그램을 만든 최초의 컴퓨터 프로그래머 중 한 명으로 평가받습니다. 그녀는 이 기계가 단순 계산을 넘어 더 다양한 용도로 사용될 수 있음을 인식했고, 당시로서는 드물게 그 잠재력을 내다보았습니다. 그녀의 공헌은 컴퓨터 과학의 발전에 초석이 되었으며, 10월의 Ada Lovelace Day는 여성의 과학·기술 분야 기여를 기리는 날로 지정되어 있습니다.
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+query = "Lady Ada Lovelace에 대해 알려줘. 그녀의 배경은?"
+response = await alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response.response.blocks[0].text)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Ada Lovelace, 또는 Augusta Ada King, 러브레이스 백작부인으로도 알려진 그녀는 영국의 수학자이자 작가입니다. 1815년 12월 10일에 태어나 1852년 11월 27일에 세상을 떠났으며, Charles Babbage의 해석기관(기계식 범용 컴퓨터 제안) 작업으로 유명합니다. Ada Lovelace는 1843년 해석기관을 위한 프로그램을 만든 최초의 컴퓨터 프로그래머 중 한 명으로 평가받습니다. 그녀는 이 기계가 단순 계산을 넘어 더 다양한 용도로 사용될 수 있음을 인식했고, 당시로서는 드물게 그 잠재력을 내다보았습니다. 그녀의 공헌은 컴퓨터 과학의 발전에 초석이 되었으며, 10월의 Ada Lovelace Day는 여성의 과학·기술 분야 기여를 기리는 날로 지정되어 있습니다.
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+response = alfred.invoke({"messages": "'Lady Ada Lovelace'에 대해 알려줘"})
+
+print("🎩 Alfred의 답변:")
+print(response['messages'][-1].content)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Ada Lovelace, 또는 Augusta Ada King, 러브레이스 백작부인으로도 알려진 그녀는 영국의 수학자이자 작가입니다. 1815년 12월 10일에 태어나 1852년 11월 27일에 세상을 떠났으며, Charles Babbage의 해석기관(기계식 범용 컴퓨터 제안) 작업으로 유명합니다. Ada Lovelace는 1843년 해석기관을 위한 프로그램을 만든 최초의 컴퓨터 프로그래머 중 한 명으로 평가받습니다. 그녀는 이 기계가 단순 계산을 넘어 더 다양한 용도로 사용될 수 있음을 인식했고, 당시로서는 드물게 그 잠재력을 내다보았습니다. 그녀의 공헌은 컴퓨터 과학의 발전에 초석이 되었으며, 10월의 Ada Lovelace Day는 여성의 과학·기술 분야 기여를 기리는 날로 지정되어 있습니다.
+```
+
+</hfoption>
+</hfoptions>
+
+### 예시 2: 불꽃놀이를 위한 날씨 확인
+
+Alfred가 날씨 정보를 어떻게 도울 수 있는지 살펴봅시다.
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+query = "오늘 밤 파리의 날씨는 어때? 불꽃놀이에 적합할까?"
+response = alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력(무작위성으로 인해 달라질 수 있음):
+```
+🎩 Alfred의 답변:
+파리의 날씨를 확인해보았습니다. 현재는 맑고 기온은 25°C입니다. 오늘 밤 불꽃놀이를 하기에 완벽한 조건입니다. 맑은 하늘 덕분에 멋진 불꽃놀이를 감상할 수 있고, 쾌적한 온도로 손님들도 야외 행사를 불편함 없이 즐기실 수 있습니다.
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+query = "오늘 밤 파리의 날씨는 어때? 불꽃놀이에 적합할까?"
+response = await alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+오늘 밤 파리의 날씨는 비가 오고 기온은 15°C입니다. 비가 오기 때문에 불꽃놀이에는 적합하지 않을 수 있습니다.
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+response = alfred.invoke({"messages": "오늘 밤 파리의 날씨는 어때? 불꽃놀이에 적합할까?"})
+
+print("🎩 Alfred의 답변:")
+print(response['messages'][-1].content)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+오늘 밤 파리의 날씨는 비가 오고 기온은 15°C로, 불꽃놀이에는 적합하지 않을 수 있습니다.
+```
+</hfoption>
+</hfoptions>
+
+### 예시 3: AI 연구자 감동시키기
+
+Alfred가 AI 연구자 손님을 어떻게 도울 수 있는지 살펴봅시다.
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+query = "우리 손님 중 한 명이 Qwen 소속이야. 그들의 가장 인기 있는 모델에 대해 알려줘."
+response = alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Qwen의 가장 인기 있는 모델은 Qwen/Qwen2.5-VL-7B-Instruct로, 3,313,345회 다운로드되었습니다.
+```
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+query = "우리 손님 중 한 명이 Google 소속이야. 그들의 가장 인기 있는 모델에 대해 알려줘."
+response = await alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Google이 Hugging Face Hub에 올린 가장 인기 있는 모델은 google/electra-base-discriminator로, 28,546,752회 다운로드되었습니다.
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+response = alfred.invoke({"messages": "우리 손님 중 한 명이 Qwen 소속이야. 그들의 가장 인기 있는 모델에 대해 알려줘."})
+
+print("🎩 Alfred의 답변:")
+print(response['messages'][-1].content)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Qwen에서 가장 많이 다운로드된 모델은 Qwen/Qwen2.5-VL-7B-Instruct로, 3,313,345회 다운로드되었습니다.
+```
+</hfoption>
+</hfoptions>
+
+### 예시 4: 여러 도구 결합하기
+
+Alfred가 Dr. Nikola Tesla와의 대화를 준비하는 데 어떻게 도울 수 있는지 살펴봅시다.
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+query = "Dr. Nikola Tesla와 최근 무선 에너지 발전에 대해 이야기해야 해. 이 대화를 준비할 수 있도록 도와줄래?"
+response = alfred.run(query)
+
+print("🎩 Alfred의 답변:")
+print(response)
+```
+
+예상 출력:
+
+```
+🎩 Alfred의 답변:
+Dr. Nikola Tesla와의 대화를 준비할 수 있도록 정보를 모았습니다.
+
+손님 정보:
+이름: Dr. Nikola Tesla
+관계: 대학 시절의 오랜 친구
+설명: Dr. Nikola Tesla는 대학 시절의 오랜 친구입니다. 최근 새로운 무선 에너지 전송 시스템 특허를 받았으며, 이에 대해 이야기 나누는 것을 매우 기뻐할 것입니다. 참고로 비둘기를 매우 좋아하니, 소소한 대화 소재로 활용해도 좋겠습니다.
+이메일: nikola.tesla@gmail.com
+
+최근 무선 에너지 발전 동향:
+웹 검색 결과, 최근 무선 에너지 전송 분야의 주요 발전 사항은 다음과 같습니다:
+1. 연구자들이 집중 전자기파를 이용한 장거리 무선 전력 전송에서 진전을 이루고 있음
+2. 여러 기업이 소비자 전자기기용 공진 유도 결합 기술을 개발 중임
+3. 물리적 연결 없이 전기차 충전 등 새로운 응용 분야가 등장함
+
+대화 시작 아이디어:
+1. "새로운 무선 에너지 전송 특허에 대해 듣고 싶어요. 대학 시절 구상했던 아이디어와 어떻게 다른가요?"
+2. "최근 소비자 전자기기용 공진 유도 결합 기술 발전을 보셨나요? 그들의 접근 방식에 대해 어떻게 생각하세요?"
+3. "비둘기들은 잘 지내나요? 예전부터 비둘기에 관심이 많으셨잖아요."
+
+이 정보들이 Dr. Tesla와의 대화에서 그의 관심사와 최근 업적을 잘 보여주며, 풍부한 대화를 나누는 데 도움이 될 것입니다.
+```
+
+</hfoption>
+</hfoptions>
+
+## 고급 기능: 대화 메모리
+
+Alfred가 갈라 파티에서 더욱 유용하게 활약할 수 있도록, 이전 상호작용을 기억하는 대화 메모리 기능을 활성화할 수 있습니다:
+
+<hfoptions id="agents-frameworks">
+<hfoption id="smolagents">
+
+```python
+# 대화 메모리가 있는 Alfred 생성
+alfred_with_memory = CodeAgent(
+    tools=[guest_info_tool, weather_info_tool, hub_stats_tool, search_tool], 
+    model=model,
+    add_base_tools=True,
+    planning_interval=3
+)
+
+# 첫 번째 상호작용
+response1 = alfred_with_memory.run("Lady Ada Lovelace에 대해 알려줘.")
+print("🎩 Alfred의 첫 답변:")
+print(response1)
+
+# 두 번째 상호작용(첫 질문을 참조)
+response2 = alfred_with_memory.run("그녀가 현재 진행 중인 프로젝트는 뭐야?", reset=False)
+print("🎩 Alfred의 두 번째 답변:")
+print(response2)
+```
+
+</hfoption>
+<hfoption id="llama-index">
+
+```python
+from llama_index.core.workflow import Context
+
+alfred = AgentWorkflow.from_tools_or_functions(
+    [guest_info_tool, search_tool, weather_info_tool, hub_stats_tool],
+    llm=llm
+)
+
+# 상태 기억
+ctx = Context(alfred)
+
+# 첫 번째 상호작용
+response1 = await alfred.run("Lady Ada Lovelace에 대해 알려줘.", ctx=ctx)
+print("🎩 Alfred의 첫 답변:")
+print(response1)
+
+# 두 번째 상호작용(첫 질문을 참조)
+response2 = await alfred.run("그녀가 현재 진행 중인 프로젝트는 뭐야?", ctx=ctx)
+print("🎩 Alfred의 두 번째 답변:")
+print(response2)
+```
+
+</hfoption>
+<hfoption id="langgraph">
+
+```python
+# 첫 번째 상호작용
+response = alfred.invoke({"messages": [HumanMessage(content="'Lady Ada Lovelace'에 대해 알려줘. 그녀의 배경과 나와의 관계도 궁금해.")]})
+
+print("🎩 Alfred의 답변:")
+print(response['messages'][-1].content)
+print()
+
+# 두 번째 상호작용(첫 질문을 참조)
+response = alfred.invoke({"messages": response["messages"] + [HumanMessage(content="그녀가 현재 진행 중인 프로젝트는 뭐야?")]})
+
+print("🎩 Alfred의 답변:")
+print(response['messages'][-1].content)
+```
+
+</hfoption>
+</hfoptions>
+
+이 세 가지 에이전트 방식 모두 메모리를 에이전트와 직접 결합하지 않는다는 점에 주목하세요. 왜 이런 설계가 선택되었을까요? 🧐
+* smolagents: 실행(run) 간에는 메모리가 유지되지 않으므로, `reset=False`로 명시적으로 지정해야 합니다.
+* LlamaIndex: 실행 내에서 메모리 관리를 위해 명시적으로 context 객체를 추가해야 합니다.
+* LangGraph: 이전 메시지 활용 또는 [MemorySaver](https://langchain-ai.github.io/langgraph/tutorials/introduction/#part-3-adding-memory-to-the-chatbot) 컴포넌트 등 다양한 메모리 옵션을 제공합니다.
+
+## 결론
+
+축하합니다! 이제 Alfred라는, 다양한 도구를 갖춘 정교한 에이전트를 성공적으로 구축하셨습니다. Alfred는 이제 다음을 할 수 있습니다:
+
+1. 손님에 대한 상세 정보 검색
+2. 야외 행사 계획을 위한 날씨 확인
+3. 영향력 있는 AI 개발자 및 모델에 대한 인사이트 제공
+4. 최신 정보 웹 검색
+5. 대화 컨텍스트를 메모리로 유지
+
+이러한 기능을 바탕으로 Alfred는 여러분의 갈라 파티가 성공적으로 진행되도록 도우며, 손님들에게 맞춤형 정보와 최신 소식을 제공해 깊은 인상을 남길 수 있습니다. 

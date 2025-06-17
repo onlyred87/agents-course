@@ -1,0 +1,47 @@
+# 함수 호출을 위한 모델 파인튜닝
+
+이제 함수 호출을 위한 첫 모델을 파인튜닝할 준비가 되었습니다 🔥.
+
+## 함수 호출을 위해 모델을 어떻게 학습시키나요?
+
+> 답: **데이터**가 필요합니다
+
+모델 학습 과정은 3단계로 나눌 수 있습니다:
+
+1. **모델을 대량의 데이터로 사전학습(pre-training)** 합니다. 이 단계의 결과는 **사전학습된 모델**입니다. 예: [google/gemma-2-2b](https://huggingface.co/google/gemma-2-2b). 이 베이스 모델은 **다음 토큰 예측만 할 줄 알고, 강력한 명령어 수행 능력은 없습니다**.
+
+2. 채팅에 유용하게 사용하려면, 모델을 **명령어 수행에 맞게 파인튜닝(fine-tuning)** 해야 합니다. 이 단계는 모델 제작자, 오픈소스 커뮤니티, 여러분 등 누구나 할 수 있습니다. 예: [google/gemma-2-2b-it](https://huggingface.co/google/gemma-2-2b-it)은 Google Gemma 팀이 만든 instruction-tuned 모델입니다.
+
+3. 마지막으로, 모델을 **제작자의 선호에 맞게 정렬(alignment)** 할 수 있습니다. 예: 고객 서비스 챗봇이 절대 무례하지 않도록 만드는 것 등.
+
+Gemini, Mistral 같은 완성형 제품은 **3단계를 모두 거치지만**, Hugging Face에서 찾을 수 있는 모델은 한두 단계만 거친 경우도 많습니다.
+
+이 튜토리얼에서는 [google/gemma-2-2b-it](https://huggingface.co/google/gemma-2-2b-it) 기반으로 함수 호출 모델을 만듭니다. 베이스 모델([google/gemma-2-2b](https://huggingface.co/google/gemma-2-2b)) 대신 instruction-tuned 모델([google/gemma-2-2b-it](https://huggingface.co/google/gemma-2-2b-it))을 선택한 이유는, 이미 우리의 목적에 맞게 개선되어 있기 때문입니다.
+
+사전학습 모델에서 시작하면 **명령어 수행, 채팅, 함수 호출까지 모두 학습해야 하므로 더 많은 학습이 필요**합니다.
+
+instruction-tuned 모델에서 시작하면 **모델이 새로 배워야 할 정보량을 최소화**할 수 있습니다.
+
+## LoRA (Low-Rank Adaptation)
+
+LoRA는 **학습해야 할 파라미터 수를 크게 줄여주는** 경량 파인튜닝 기법입니다.
+
+LoRA는 **모델에 소규모 어댑터 가중치를 삽입해 그 부분만 학습**합니다. 덕분에 학습이 훨씬 빠르고, 메모리 효율적이며, 모델 가중치도 수백 MB 수준으로 작아져 저장·공유가 쉽습니다.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit1/blog_multi-lora-serving_LoRA.gif" alt="LoRA inference" width="50%"/>
+
+LoRA는 Transformer의 선형 계층 등 일부 계층에 랭크 분해 행렬 쌍을 추가합니다. 학습 중에는 나머지 모델을 "동결(freeze)"하고, 어댑터 가중치만 업데이트합니다.
+
+이렇게 하면 **학습해야 할 파라미터 수가 크게 줄어들고**, 어댑터 가중치만 업데이트하면 됩니다.
+
+추론 시에는 입력이 어댑터와 베이스 모델로 전달되거나, 어댑터 가중치를 베이스 모델에 병합해 추가 지연 없이 사용할 수 있습니다.
+
+LoRA는 **대형** 언어 모델을 특정 작업이나 도메인에 맞게 적응시키는 데 특히 유용하며, 리소스 요구량을 관리하기 쉽게 해줍니다. 즉, 모델 학습에 필요한 메모리도 줄어듭니다.
+
+LoRA 작동 원리를 더 알고 싶다면 [이 튜토리얼](https://huggingface.co/learn/nlp-course/chapter11/4?fw=pt)을 참고하세요.
+
+## 함수 호출 모델 파인튜닝 실습
+
+튜토리얼 노트북은 👉 [여기](https://huggingface.co/agents-course/notebooks/blob/main/bonus-unit1/bonus-unit1.ipynb)에서 확인할 수 있습니다.
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/#fileId=https://huggingface.co/agents-course/notebooks/blob/main/bonus-unit1/bonus-unit1.ipynb) 버튼을 눌러 Colab에서 직접 실행해보세요. 

@@ -1,0 +1,52 @@
+# 실습(HANDS-ON)
+
+이제 여러분의 최종 에이전트 제작에 본격적으로 뛰어들 준비가 되었습니다. 제출 방법을 살펴보겠습니다.
+
+## 데이터셋
+
+이 리더보드에서 사용하는 데이터셋은 GAIA **검증 세트**의 레벨 1 문제 중 20개를 추출한 것입니다.
+
+선정된 문제들은 답변에 필요한 도구 수와 단계 수를 기준으로 필터링되었습니다.
+
+GAIA 벤치마크의 현재 상황을 고려할 때, 레벨 1 문제에서 30% 달성을 목표로 삼는 것이 적절한 도전이라고 생각합니다.
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit4/leaderboard%20GAIA%2024%3A04%3A2025.png" alt="GAIA current status!" />
+
+## 제출 프로세스
+
+아마 여러분이 가장 궁금한 점은 "어떻게 제출을 시작하나요?"일 것입니다.
+
+이 유닛에서는 질문을 받아오고, 답변을 제출해 점수를 받을 수 있는 API를 만들었습니다.
+아래는 주요 엔드포인트 요약입니다(자세한 내용은 [라이브 문서](https://agents-course-unit4-scoring.hf.space/docs) 참고):
+
+* **`GET /questions`**: 필터링된 평가 질문 전체 목록을 가져옵니다.
+* **`GET /random-question`**: 목록에서 무작위 질문 하나를 가져옵니다.
+* **`GET /files/{task_id}`**: 특정 task ID에 연결된 파일을 다운로드합니다.
+* **`POST /submit`**: 에이전트의 답변을 제출하고, 점수를 계산해 리더보드를 갱신합니다.
+
+제출 함수는 정답과 **EXACT MATCH(정확 일치)** 방식으로 비교하므로, 프롬프트를 신중하게 설계하세요! GAIA 팀이 제공한 프롬프트 예시는 [여기](https://huggingface.co/spaces/gaia-benchmark/leaderboard)에서 확인할 수 있습니다(이 과정에서는 제출 답변에 "FINAL ANSWER"라는 텍스트를 포함하지 말고, 정답만 출력하도록 하세요).
+
+🎨 **템플릿을 자유롭게 활용하세요!**
+
+API와 상호작용하는 과정을 보여주기 위해 [기본 템플릿](https://huggingface.co/spaces/agents-course/Final_Assignment_Template)을 제공합니다.
+
+여러분만의 방식과 창의성에 맞게 자유롭게 수정, 추가, 재구성하는 것을 적극 권장합니다!
+
+이 템플릿을 제출하려면 API에 필요한 3가지 정보를 준비해야 합니다:
+
+* **Username:** Hugging Face 사용자명(Gradio 로그인으로 획득), 제출 식별에 사용됩니다.
+* **Code Link (`agent_code`):** Hugging Face Space 코드(`.../tree/main`)의 URL(공개 상태 유지 필요)
+* **Answers (`answers`):** 에이전트가 생성한 답변 리스트(`{"task_id": ..., "submitted_answer": ...}`)
+
+따라서 [이 템플릿](https://huggingface.co/spaces/agents-course/Final_Assignment_Template)을 복제해 자신의 Hugging Face 프로필에서 시작해보세요.
+
+🏆 리더보드는 [여기](https://huggingface.co/spaces/agents-course/Students_leaderboard)에서 확인할 수 있습니다.
+
+*참고: 이 리더보드는 재미를 위한 것입니다! 코드 공개 없이 높은 점수만 반복 제출하는 경우, 리더보드의 유용성을 위해 일부 항목을 검토·조정·삭제할 수 있습니다.*
+리더보드에는 여러분의 Space 코드 링크가 표시되니, 자랑스러운 점수를 얻었다면 Space를 공개로 유지해 주세요.
+<iframe
+	src="https://agents-course-students-leaderboard.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe> 

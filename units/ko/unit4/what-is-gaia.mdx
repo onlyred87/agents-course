@@ -1,0 +1,70 @@
+# GAIA란 무엇인가?
+
+[GAIA](https://huggingface.co/papers/2311.12983)는 **추론, 멀티모달 이해, 웹 브라우징, 도구 활용 등 핵심 역량의 조합이 필요한 실제 과제에서 AI 어시스턴트를 평가하기 위해 설계된 벤치마크**입니다.
+
+이 벤치마크는 논문 _"[GAIA: A Benchmark for General AI Assistants](https://huggingface.co/papers/2311.12983)"_에서 처음 소개되었습니다.
+
+GAIA는 **인간에게는 개념적으로 단순하지만, 현재 AI 시스템에게는 매우 도전적인** **466개의 엄선된 질문**을 제공합니다.
+
+이 격차를 예시로 들면:
+- **인간**: 약 92% 성공률
+- **GPT-4(플러그인 사용)**: 약 15%
+- **Deep Research(OpenAI)**: 검증 세트에서 67.36%
+
+GAIA는 AI 모델의 현재 한계를 조명하고, 진정한 범용 AI 어시스턴트로의 발전을 평가할 수 있는 엄격한 기준을 제시합니다.
+
+## 🌱 GAIA의 핵심 원칙
+
+GAIA는 다음과 같은 기둥을 중심으로 신중하게 설계되었습니다:
+
+- 🔍 **현실 세계 난이도**: 과제는 다단계 추론, 멀티모달 이해, 도구 상호작용을 요구합니다.
+- 🧾 **인간 해석 용이성**: AI에게는 어렵지만, 인간에게는 개념적으로 단순하고 따라가기 쉽습니다.
+- 🛡️ **비게임성**: 정답을 얻으려면 전체 과제를 완수해야 하므로, 무작위 대입이 통하지 않습니다.
+- 🧰 **평가의 단순성**: 답변은 간결하고, 사실 기반이며, 모호하지 않아 벤치마크에 이상적입니다.
+
+## 난이도 레벨
+
+GAIA 과제는 **점점 복잡해지는 세 가지 레벨**로 구성되어 있으며, 각 레벨은 특정 역량을 평가합니다:
+
+- **레벨 1**: 5단계 미만, 최소한의 도구 사용
+- **레벨 2**: 더 복잡한 추론, 여러 도구의 조합, 5~10단계
+- **레벨 3**: 장기적 계획과 다양한 도구의 고도 통합 요구
+
+![GAIA 레벨](https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit4/gaia_levels.png)
+
+## 어려운 GAIA 질문 예시
+
+> 2008년 그림 "Embroidery from Uzbekistan"에 그려진 과일 중, 이후 영화 "The Last Voyage"의 소품으로 사용된 대형 유람선의 1949년 10월 아침 식단에 포함된 과일은 무엇인가요? 그림에서 12시 방향부터 시계 방향으로, 복수형으로, 쉼표로 구분해 나열하세요.
+
+이 질문은 AI 시스템에 여러 측면에서 도전이 됩니다:
+
+- **구조화된 응답 형식** 요구
+- **멀티모달 추론**(예: 이미지 분석)
+- **다단계 정보 검색** 필요:
+  - 그림 속 과일 식별
+  - 해당 유람선이 *The Last Voyage*에 사용된 사실 확인
+  - 1949년 10월 해당 선박의 아침 식단 조사
+- **정확한 순서**와 고차원적 계획 필요
+
+이런 유형의 과제는 단일 LLM이 자주 실패하는 영역을 보여주며, GAIA가 **다단계 추론과 멀티모달 처리, 실행이 가능한 에이전트 기반 시스템** 벤치마크로 적합함을 강조합니다.
+
+![GAIA 역량 플롯](https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit4/gaia_capabilities.png)
+
+## 실시간 평가
+
+지속적인 벤치마킹을 장려하기 위해, **GAIA는 Hugging Face에서 공개 리더보드를 제공합니다**. 여기서 여러분은 **300개의 테스트 문제**로 모델을 평가할 수 있습니다.
+
+👉 리더보드 확인하기: [여기](https://huggingface.co/spaces/gaia-benchmark/leaderboard)
+
+<iframe
+	src="https://gaia-benchmark-leaderboard.hf.space"
+	frameborder="0"
+	width="850"
+	height="450"
+></iframe>
+
+GAIA를 더 깊이 탐구하고 싶으신가요?
+
+- 📄 [전체 논문 읽기](https://huggingface.co/papers/2311.12983)
+- 📄 [OpenAI의 Deep Research 릴리즈 포스트](https://openai.com/index/introducing-deep-research/)
+- 📄 [오픈소스 DeepResearch – 검색 에이전트의 자유](https://huggingface.co/blog/open-deep-research) 

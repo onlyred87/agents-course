@@ -1,0 +1,90 @@
+# 온보딩: 첫걸음 ⛵
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/unit0/time-to-onboard.jpg" alt="Time to Onboard" width="100%"/>
+
+이제 모든 정보를 알았으니, 시작해봅시다! 네 가지를 진행합니다:
+
+1. **Hugging Face 계정 생성**(아직 없다면)
+2. **디스코드 가입 및 자기소개**(부끄러워하지 마세요 🤗)
+3. **Hugging Face Agents Course 팔로우**
+4. **코스 홍보**
+
+### 1단계: Hugging Face 계정 만들기
+
+(아직 없다면) <a href='https://huggingface.co/join' target='_blank'>여기</a>에서 계정 생성
+
+### 2단계: 디스코드 커뮤니티 참여
+
+👉🏻 <a href="https://discord.gg/UrrTSsSyjb" target="_blank">여기</a>에서 디스코드 서버 참여
+
+참여 후 `#introduce-yourself` 채널에서 자기소개
+
+AI 에이전트 관련 채널:
+- `agents-course-announcements`: **최신 코스 정보**
+- `🎓-agents-course-general`: **일반 토론 및 잡담**
+- `agents-course-questions`: **질문 및 동료 도움**
+- `agents-course-showcase`: **최고의 에이전트 자랑**
+
+추가 채널:
+- `smolagents`: **라이브러리 토론/지원**
+
+디스코드가 처음이라면 [다음 섹션](discord101)에서 101 가이드를 참고하세요.
+
+### 3단계: Hugging Face Agent Course 조직 팔로우
+
+최신 자료, 업데이트, 공지 확인을 위해 **Hugging Face Agents Course 조직**을 팔로우하세요.
+
+👉 <a href="https://huggingface.co/agents-course" target="_blank">여기</a>에서 **팔로우** 클릭
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/communication/hf_course_follow.gif" alt="Follow" width="100%"/>
+
+### 4단계: 코스 홍보
+
+코스를 더 널리 알릴 수 있도록 도와주세요! 방법은 두 가지입니다:
+
+1. <a href="https://github.com/huggingface/agents-course" target="_blank">코스 저장소</a>에 ⭐ 남기기
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/communication/please_star.gif" alt="Repo star"/>
+
+2. 학습 과정을 **SNS에 공유**: 사용할 수 있는 일러스트도 준비되어 있습니다
+
+<img src="https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/communication/share.png">
+
+👉 [여기](https://huggingface.co/datasets/agents-course/course-images/resolve/main/en/communication/share.png?download=true)에서 이미지 다운로드
+
+### 5단계: Ollama로 로컬 모델 실행(크레딧 제한 시)
+
+1. **Ollama 설치**
+    <a href="https://ollama.com/download" target="_blank">공식 안내</a> 참고
+2. **로컬 모델 다운로드**
+``` bash
+    ollama pull qwen2:7b # ollama 웹사이트에서 더 많은 모델 확인
+```
+3. **Ollama 백그라운드 실행(터미널에서)**
+``` bash
+    ollama serve
+```
+    만약 "listen tcp 127.0.0.1:11434: bind: address already in use" 오류가 발생하면 `sudo lsof -i :11434`로 해당 포트 사용 프로세스(PID) 확인. 만약 프로세스가 `ollama`라면 이미 서비스가 실행 중이니 이 단계는 건너뛰어도 됨.
+4. **InferenceClientModel 대신 LiteLLMModel 사용**
+
+   smolagents에서 `LiteLLMModel`을 사용하려면 pip로 설치
+``` bash
+    pip install 'smolagents[litellm]'
+```
+``` python
+    from smolagents import LiteLLMModel
+
+    model = LiteLLMModel(
+        model_id="ollama_chat/qwen2:7b",  # Ollama 지원 모델 사용 가능
+        api_base="http://127.0.0.1:11434",  # 기본 Ollama 로컬 서버
+        num_ctx=8192,
+    )
+```
+5. **작동 원리**
+- Ollama는 OpenAI 호환 API(`http://localhost:11434`)로 로컬 모델 제공
+- `LiteLLMModel`은 OpenAI chat/completion API 포맷 지원 모델과 통신 가능
+- 즉, `InferenceClientModel` 대신 `LiteLLMModel`만 바꾸면 코드 수정 없이 사용 가능
+
+축하합니다! 🎉 **온보딩을 완료했습니다**! 이제 AI 에이전트 학습을 시작할 준비가 되었습니다. 즐겁게 학습하세요!
+
+계속 배우고, 멋진 하루 보내세요 🤗 
